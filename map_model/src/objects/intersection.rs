@@ -111,7 +111,8 @@ impl Intersection {
             .iter()
             .map(|r| map.get_r(*r).zorder)
             .min()
-            .unwrap()
+            // TODO tmp
+            .unwrap_or(0)
     }
 
     pub fn get_rank(&self, map: &Map) -> osm::RoadRank {
@@ -119,7 +120,8 @@ impl Intersection {
             .iter()
             .map(|r| map.get_r(*r).get_rank())
             .max()
-            .unwrap()
+            // TODO tmp
+            .unwrap_or(osm::RoadRank::Local)
     }
 
     pub fn get_roads_sorted_by_incoming_angle(&self, all_roads: &Vec<Road>) -> Vec<RoadID> {

@@ -18,6 +18,7 @@ members = [
   "parking_mapper",
   "popdat",
   "sim",
+  "sumo",
   "tests",
   "traffic_seitan",
   "updater",

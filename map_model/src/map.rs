@@ -680,4 +680,14 @@ impl Map {
                 .collect(),
         )
     }
+
+    pub fn import_minimal(name: MapName, bounds: Bounds, intersections: Vec<Intersection>) -> Map {
+        let mut map = Map::blank();
+        map.name = name;
+        map.map_loaded_directly();
+        map.bounds = bounds;
+        map.boundary_polygon = map.bounds.get_rectangle();
+        map.intersections = intersections;
+        map
+    }
 }
