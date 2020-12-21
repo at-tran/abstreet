@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +12,8 @@ use map_model::{
 use crate::{
     AgentID, AgentType, AlertLocation, CarID, Event, ParkingSpot, TripID, TripMode, TripPhaseType,
 };
+use downcast_rs::__std::collections::hash_map::Entry;
+use std::hash::Hash;
 
 /// As a simulation runs, different pieces emit Events. The Analytics object listens to these,
 /// organizing and storing some information from them. The UI queries Analytics to draw time-series
@@ -508,47 +510,80 @@ pub struct TripPhase {
 
 /// See https://github.com/dabreegster/abstreet/issues/85
 #[derive(Clone, Serialize, Deserialize)]
-pub struct TimeSeriesCount<X: Ord + Clone> {
-    /// (Road or intersection, type, hour block) -> count for that hour
-    pub counts: BTreeMap<(X, AgentType, usize), usize>,
+pub struct TimeSeriesCount<X: Ord + Clone + Hash + Eq> {
+    /// (Road or intersection, type) -> Vec of sum of counts
+    pub sum_counts: HashMap<(X, AgentType), Vec<u16>>,
 
-    /// Very expensive to store, so it's optional. But useful to flag on to experiment with
-    /// representations better than the hour count above.
-    pub raw: Vec<(Time, AgentType, X)>,
+    /// The interval index of the previous time `record` was called
+    /// for each `id` and `agent_type`
+    #[serde(skip_serializing, skip_deserializing)]
+    prev_indices: HashMap<(X, AgentType), usize>,
 }
 
-impl<X: Ord + Clone> TimeSeriesCount<X> {
+const THRUPUT_INTERVAL: Duration = Duration::minutes(1);
+
+impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
     fn new() -> TimeSeriesCount<X> {
         TimeSeriesCount {
-            counts: BTreeMap::new(),
-            raw: Vec::new(),
+            sum_counts: HashMap::new(),
+            prev_indices: HashMap::new(),
         }
     }
 
+    /// Returns the interval index corresponding to `time`.
+    /// Rounds down, so 00:00:00 and 00:00:59 are both in interval 0
+    /// if the `THRUPUT_INTERVAL` is 1 minute
+    fn time_to_interval(time: Time) -> usize {
+        ((time - Time::START_OF_DAY) / THRUPUT_INTERVAL) as usize
+    }
+
+    /// This function assumes the provided `time` is later than all previous `time`
+    /// passed into this function for each `id` and `agent_type` pair
     fn record(&mut self, time: Time, id: X, agent_type: AgentType, count: usize) {
-        // TODO Manually change flag
-        if false {
-            // TODO Woo, handling transit passengers is even more expensive in this already
-            // expensive representation...
-            for _ in 0..count {
-                self.raw.push((time, agent_type, id.clone()));
+        let interval = Self::time_to_interval(time);
+        let prev_index = *self
+            .prev_indices
+            .get(&(id.clone(), agent_type))
+            .unwrap_or(&0);
+
+        if interval < prev_index {
+            panic!(
+                "Can't record throughput count at interval {} \
+                because it is earlier than interval {}",
+                interval, prev_index
+            );
+        }
+
+        match self.sum_counts.entry((id.clone(), agent_type)) {
+            Entry::Occupied(ref mut entry) => {
+                let sum_count = entry.get_mut();
+                for i in (prev_index + 1)..interval {
+                    assert_eq!(sum_count[i], 0);
+                    sum_count[i] = sum_count[i - 1];
+                }
+                sum_count[interval] = sum_count[interval - 1] + count as u16;
+            }
+            Entry::Vacant(entry) => {
+                let mut new_sum_counts = vec![0; (Duration::hours(24) / THRUPUT_INTERVAL) as usize];
+                new_sum_counts[interval] = count as u16;
+                entry.insert(new_sum_counts);
             }
         }
 
-        let hour = time.get_parts().0;
-        *self.counts.entry((id, agent_type, hour)).or_insert(0) += count;
+        self.prev_indices[&(id, agent_type)] = interval;
     }
 
     pub fn total_for(&self, id: X) -> usize {
         let mut cnt = 0;
         for agent_type in AgentType::all() {
-            // TODO Hmm
-            for hour in 0..24 {
-                cnt += self
-                    .counts
-                    .get(&(id.clone(), agent_type, hour))
-                    .cloned()
-                    .unwrap_or(0);
+            if let Some(sum_count) = self.sum_counts.get(&(id.clone(), agent_type)) {
+                // The last non-zero count is the sum of all counts for the day
+                for count in sum_count.iter().rev() {
+                    if *count != 0 {
+                        cnt += *count as usize;
+                        break;
+                    }
+                }
             }
         }
         cnt
@@ -556,7 +591,7 @@ impl<X: Ord + Clone> TimeSeriesCount<X> {
 
     pub fn all_total_counts(&self) -> Counter<X> {
         let mut cnt = Counter::new();
-        for ((id, _, _), value) in &self.counts {
+        for ((id, _, _), value) in &self.sum_counts {
             cnt.add(id.clone(), *value);
         }
         cnt
@@ -569,7 +604,7 @@ impl<X: Ord + Clone> TimeSeriesCount<X> {
             let mut pts = Vec::new();
             for hour in 0..=hour {
                 let cnt = self
-                    .counts
+                    .sum_counts
                     .get(&(id.clone(), agent_type, hour))
                     .cloned()
                     .unwrap_or(0);
@@ -618,33 +653,5 @@ impl<X: Ord + Clone> TimeSeriesCount<X> {
         }
 
         pts_per_type.into_iter().collect()
-    }
-}
-
-pub struct Window {
-    times: VecDeque<Time>,
-    window_size: Duration,
-}
-
-impl Window {
-    pub fn new(window_size: Duration) -> Window {
-        Window {
-            times: VecDeque::new(),
-            window_size,
-        }
-    }
-
-    /// Returns the count at time
-    pub fn add(&mut self, time: Time) -> usize {
-        self.times.push_back(time);
-        self.count(time)
-    }
-
-    /// Grab the count at this time, but don't add a new time
-    pub fn count(&mut self, end: Time) -> usize {
-        while !self.times.is_empty() && end - *self.times.front().unwrap() > self.window_size {
-            self.times.pop_front();
-        }
-        self.times.len()
     }
 }

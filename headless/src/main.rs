@@ -319,7 +319,7 @@ fn handle_command(
             counts: sim
                 .get_analytics()
                 .road_thruput
-                .counts
+                .sum_counts
                 .iter()
                 .map(|((r, a, hr), cnt)| (*r, *a, *hr, *cnt))
                 .collect(),

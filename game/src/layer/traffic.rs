@@ -289,11 +289,11 @@ impl CompareThroughput {
         let mut after_road = Counter::new();
         let mut before_road = Counter::new();
         {
-            for ((r, _, _), count) in &after.road_thruput.counts {
+            for ((r, _, _), count) in &after.road_thruput.sum_counts {
                 after_road.add(*r, *count);
             }
             // TODO ew. lerp?
-            for ((r, _, hr), count) in &before.road_thruput.counts {
+            for ((r, _, hr), count) in &before.road_thruput.sum_counts {
                 if *hr <= hour {
                     before_road.add(*r, *count);
                 }
@@ -302,11 +302,11 @@ impl CompareThroughput {
         let mut after_intersection = Counter::new();
         let mut before_intersection = Counter::new();
         {
-            for ((i, _, _), count) in &after.intersection_thruput.counts {
+            for ((i, _, _), count) in &after.intersection_thruput.sum_counts {
                 after_intersection.add(*i, *count);
             }
             // TODO ew. lerp?
-            for ((i, _, hr), count) in &before.intersection_thruput.counts {
+            for ((i, _, hr), count) in &before.intersection_thruput.sum_counts {
                 if *hr <= hour {
                     before_intersection.add(*i, *count);
                 }
