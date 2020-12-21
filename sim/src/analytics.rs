@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -514,34 +514,35 @@ pub struct TimeSeriesCount<X: Ord + Clone + Hash + Eq> {
     /// (Road or intersection, type) -> Vec of sum of counts
     pub sum_counts: HashMap<(X, AgentType), Vec<u16>>,
 
-    /// The interval index of the previous time `record` was called
-    /// for each `id` and `agent_type`
-    #[serde(skip_serializing, skip_deserializing)]
+    // The interval index of the previous time `record` was called
+    // for each `id` and `agent_type`
     prev_indices: HashMap<(X, AgentType), usize>,
+
+    thruput_interval: Duration,
+    window_size: Duration,
 }
 
 impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
-    const THRUPUT_INTERVAL: Duration = Duration::minutes(1);
-    const WINDOW_SIZE: Duration = Duration::minutes(30);
-
     fn new() -> TimeSeriesCount<X> {
         TimeSeriesCount {
             sum_counts: HashMap::new(),
             prev_indices: HashMap::new(),
+            thruput_interval: Duration::minutes(1),
+            window_size: Duration::minutes(30),
         }
     }
 
     /// Returns the interval index corresponding to `time`.
     /// Rounds down, so 00:00:00 and 00:00:59 are both in interval 0
-    /// if the `THRUPUT_INTERVAL` is 1 minute.
-    fn time_to_interval(time: Time) -> usize {
-        ((time - Time::START_OF_DAY) / Self::THRUPUT_INTERVAL) as usize
+    /// if the `self.thruput_interval` is 1 minute.
+    fn time_to_interval(&self, time: Time) -> usize {
+        ((time - Time::START_OF_DAY) / self.thruput_interval) as usize
     }
 
     /// This function assumes the provided `time` is later than all previous `time`
     /// passed into this function for each `id` and `agent_type` pair
     fn record(&mut self, time: Time, id: X, agent_type: AgentType, count: usize) {
-        let interval = Self::time_to_interval(time);
+        let interval = self.time_to_interval(time);
         let prev_index = *self
             .prev_indices
             .get(&(id.clone(), agent_type))
@@ -566,13 +567,13 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
             }
             Entry::Vacant(entry) => {
                 let mut new_sum_counts =
-                    vec![0; (Duration::hours(24) / Self::THRUPUT_INTERVAL) as usize];
+                    vec![0; (Duration::hours(24) / self.thruput_interval) as usize];
                 new_sum_counts[interval] = count as u16;
                 entry.insert(new_sum_counts);
             }
         }
 
-        self.prev_indices[&(id, agent_type)] = interval;
+        *self.prev_indices.get_mut(&(id, agent_type)).unwrap() = interval;
     }
 
     /// Given a sum_count vector, returns the total number of counts for the day.
@@ -612,22 +613,50 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
 
             let mut t = Time::START_OF_DAY;
             while t < now {
-                let interval_start = if t < Time::START_OF_DAY + Self::WINDOW_SIZE {
+                let interval_start = if t < Time::START_OF_DAY + self.window_size {
                     0
                 } else {
-                    Self::time_to_interval(t - Self::WINDOW_SIZE)
+                    self.time_to_interval(t - self.window_size)
                 };
-                let interval_end = Self::time_to_interval(t);
+                let interval_end = self.time_to_interval(t);
 
                 let count = self.sum_counts[&(id.clone(), agent_type)][interval_end]
                     - self.sum_counts[&(id.clone(), agent_type)][interval_start];
                 pts.push((t, count as usize));
-                t += Self::THRUPUT_INTERVAL;
+                t += self.thruput_interval;
             }
 
             pts_per_type.insert(agent_type, pts);
         }
 
         pts_per_type.into_iter().collect()
+    }
+}
+
+pub struct Window {
+    times: VecDeque<Time>,
+    window_size: Duration,
+}
+
+impl Window {
+    pub fn new(window_size: Duration) -> Window {
+        Window {
+            times: VecDeque::new(),
+            window_size,
+        }
+    }
+
+    /// Returns the count at time
+    pub fn add(&mut self, time: Time) -> usize {
+        self.times.push_back(time);
+        self.count(time)
+    }
+
+    /// Grab the count at this time, but don't add a new time
+    pub fn count(&mut self, end: Time) -> usize {
+        while !self.times.is_empty() && end - *self.times.front().unwrap() > self.window_size {
+            self.times.pop_front();
+        }
+        self.times.len()
     }
 }
