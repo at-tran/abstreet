@@ -576,22 +576,11 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
         *self.prev_indices.get_mut(&(id, agent_type)).unwrap() = interval;
     }
 
-    /// Given a sum_count vector, returns the total number of counts for the day.
-    /// This is equal ot the last non-zero value in the vector.
-    fn total_from_sum_count(sum_count: &Vec<u16>) -> usize {
-        for count in sum_count.iter().rev() {
-            if *count != 0 {
-                return *count as usize;
-            }
-        }
-        return 0;
-    }
-
     pub fn total_for(&self, id: X) -> usize {
         let mut cnt = 0;
         for agent_type in AgentType::all() {
             if let Some(sum_count) = self.sum_counts.get(&(id.clone(), agent_type)) {
-                cnt += Self::total_from_sum_count(sum_count);
+                cnt += total_from_sum_count(sum_count);
             }
         }
         cnt
@@ -600,7 +589,7 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
     pub fn all_total_counts(&self) -> Counter<X> {
         let mut cnt = Counter::new();
         for ((id, _), value) in &self.sum_counts {
-            cnt.add(id.clone(), Self::total_from_sum_count(value));
+            cnt.add(id.clone(), total_from_sum_count(value));
         }
         cnt
     }
@@ -659,4 +648,15 @@ impl Window {
         }
         self.times.len()
     }
+}
+
+/// Given a sum_count vector, returns the total number of counts for the day.
+/// This is equal ot the last non-zero value in the vector.
+pub fn total_from_sum_count(sum_count: &Vec<u16>) -> usize {
+    for count in sum_count.iter().rev() {
+        if *count != 0 {
+            return *count as usize;
+        }
+    }
+    return 0;
 }

@@ -3,7 +3,7 @@ use geom::{Distance, Time};
 use map_gui::tools::{amenity_type, ColorDiscrete, ColorLegend, ColorNetwork};
 use map_gui::ID;
 use map_model::{LaneType, PathConstraints};
-use sim::AgentType;
+use sim::{total_from_sum_count, AgentType};
 use widgetry::{
     Btn, Color, Drawable, EventCtx, GfxCtx, HorizontalAlignment, Line, Panel, Text, TextExt,
     VerticalAlignment, Widget,
@@ -68,7 +68,7 @@ impl BikeNetwork {
         }
 
         // Show throughput, broken down by bike lanes or not
-        for ((r, agent_type, _), count) in &app.primary.sim.get_analytics().road_thruput.sum_counts
+        for ((r, agent_type), sum_count) in &app.primary.sim.get_analytics().road_thruput.sum_counts
         {
             if *agent_type == AgentType::Bike {
                 if app
@@ -79,15 +79,15 @@ impl BikeNetwork {
                     .into_iter()
                     .any(|(_, _, lt)| lt == LaneType::Biking)
                 {
-                    on_bike_lanes.add(*r, *count);
+                    on_bike_lanes.add(*r, total_from_sum_count(sum_count));
                 } else {
-                    off_bike_lanes.add(*r, *count);
+                    off_bike_lanes.add(*r, total_from_sum_count(sum_count));
                 }
             }
         }
 
         // Use intersection data too, but bin as on bike lanes or not based on connecting roads
-        for ((i, agent_type, _), count) in &app
+        for ((i, agent_type), sum_count) in &app
             .primary
             .sim
             .get_analytics()
@@ -103,9 +103,9 @@ impl BikeNetwork {
                     .iter()
                     .any(|r| on_bike_lanes.get(*r) > 0)
                 {
-                    intersections_on.add(*i, *count);
+                    intersections_on.add(*i, total_from_sum_count(sum_count));
                 } else {
-                    intersections_off.add(*i, *count);
+                    intersections_off.add(*i, total_from_sum_count(sum_count));
                 }
             }
         }

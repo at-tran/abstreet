@@ -321,7 +321,7 @@ fn handle_command(
                 .road_thruput
                 .sum_counts
                 .iter()
-                .map(|((r, a, hr), cnt)| (*r, *a, *hr, *cnt))
+                .map(|((r, a), cnt)| (*r, *a, cnt.clone()))
                 .collect(),
         })),
         "/data/get-blocked-by-graph" => Ok(abstutil::to_json(&BlockedByGraph {
@@ -409,7 +409,7 @@ struct AgentPosition {
 #[derive(Serialize)]
 struct RoadThroughput {
     // (road, agent type, hour since midnight, throughput for that one hour period)
-    counts: Vec<(RoadID, AgentType, usize, usize)>,
+    counts: Vec<(RoadID, AgentType, Vec<u16>)>,
 }
 
 #[derive(Serialize)]

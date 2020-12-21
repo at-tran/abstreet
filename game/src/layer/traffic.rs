@@ -8,7 +8,7 @@ use map_gui::render::unzoomed_agent_radius;
 use map_gui::tools::{ColorLegend, ColorNetwork, DivergingScale};
 use map_gui::ID;
 use map_model::{IntersectionID, Map, Traversable};
-use sim::VehicleType;
+use sim::{total_from_sum_count, VehicleType};
 use widgetry::{
     Btn, Checkbox, Color, Drawable, EventCtx, GeomBatch, GfxCtx, HorizontalAlignment, Line,
     Outcome, Panel, Text, TextExt, VerticalAlignment, Widget,
@@ -289,27 +289,23 @@ impl CompareThroughput {
         let mut after_road = Counter::new();
         let mut before_road = Counter::new();
         {
-            for ((r, _, _), count) in &after.road_thruput.sum_counts {
-                after_road.add(*r, *count);
+            for ((r, _), sum_count) in &after.road_thruput.sum_counts {
+                after_road.add(*r, total_from_sum_count(sum_count));
             }
             // TODO ew. lerp?
-            for ((r, _, hr), count) in &before.road_thruput.sum_counts {
-                if *hr <= hour {
-                    before_road.add(*r, *count);
-                }
+            for ((r, _), sum_count) in &before.road_thruput.sum_counts {
+                before_road.add(*r, total_from_sum_count(sum_count));
             }
         }
         let mut after_intersection = Counter::new();
         let mut before_intersection = Counter::new();
         {
-            for ((i, _, _), count) in &after.intersection_thruput.sum_counts {
-                after_intersection.add(*i, *count);
+            for ((i, _), sum_count) in &after.intersection_thruput.sum_counts {
+                after_intersection.add(*i, total_from_sum_count(sum_count));
             }
             // TODO ew. lerp?
-            for ((i, _, hr), count) in &before.intersection_thruput.sum_counts {
-                if *hr <= hour {
-                    before_intersection.add(*i, *count);
-                }
+            for ((i, _), sum_count) in &before.intersection_thruput.sum_counts {
+                before_intersection.add(*i, total_from_sum_count(sum_count));
             }
         }
 

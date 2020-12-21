@@ -28,7 +28,7 @@ pub use crate::render::{
     UnzoomedAgent,
 };
 
-pub use self::analytics::{Analytics, TripPhase};
+pub use self::analytics::{total_from_sum_count, Analytics, TripPhase};
 pub(crate) use self::cap::CapSimState;
 pub(crate) use self::events::Event;
 pub use self::events::{AlertLocation, TripPhaseType};
