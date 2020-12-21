@@ -218,13 +218,7 @@ pub fn traffic(
         ctx,
         app,
         "Number of commuters and vehicles per hour",
-        move |a| {
-            if a.road_thruput.raw.is_empty() {
-                a.road_thruput.count_per_hour(r, time)
-            } else {
-                a.road_thruput.raw_throughput(time, r)
-            }
-        },
+        move |a| a.road_thruput.throughput_vec(time, r),
         &opts,
     ));
 

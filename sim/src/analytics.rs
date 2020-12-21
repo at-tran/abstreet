@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -520,9 +520,10 @@ pub struct TimeSeriesCount<X: Ord + Clone + Hash + Eq> {
     prev_indices: HashMap<(X, AgentType), usize>,
 }
 
-const THRUPUT_INTERVAL: Duration = Duration::minutes(1);
-
 impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
+    const THRUPUT_INTERVAL: Duration = Duration::minutes(1);
+    const WINDOW_SIZE: Duration = Duration::minutes(30);
+
     fn new() -> TimeSeriesCount<X> {
         TimeSeriesCount {
             sum_counts: HashMap::new(),
@@ -532,9 +533,9 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
 
     /// Returns the interval index corresponding to `time`.
     /// Rounds down, so 00:00:00 and 00:00:59 are both in interval 0
-    /// if the `THRUPUT_INTERVAL` is 1 minute
+    /// if the `THRUPUT_INTERVAL` is 1 minute.
     fn time_to_interval(time: Time) -> usize {
-        ((time - Time::START_OF_DAY) / THRUPUT_INTERVAL) as usize
+        ((time - Time::START_OF_DAY) / Self::THRUPUT_INTERVAL) as usize
     }
 
     /// This function assumes the provided `time` is later than all previous `time`
@@ -564,7 +565,8 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
                 sum_count[interval] = sum_count[interval - 1] + count as u16;
             }
             Entry::Vacant(entry) => {
-                let mut new_sum_counts = vec![0; (Duration::hours(24) / THRUPUT_INTERVAL) as usize];
+                let mut new_sum_counts =
+                    vec![0; (Duration::hours(24) / Self::THRUPUT_INTERVAL) as usize];
                 new_sum_counts[interval] = count as u16;
                 entry.insert(new_sum_counts);
             }
@@ -573,17 +575,22 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
         self.prev_indices[&(id, agent_type)] = interval;
     }
 
+    /// Given a sum_count vector, returns the total number of counts for the day.
+    /// This is equal ot the last non-zero value in the vector.
+    fn total_from_sum_count(sum_count: &Vec<u16>) -> usize {
+        for count in sum_count.iter().rev() {
+            if *count != 0 {
+                return *count as usize;
+            }
+        }
+        return 0;
+    }
+
     pub fn total_for(&self, id: X) -> usize {
         let mut cnt = 0;
         for agent_type in AgentType::all() {
             if let Some(sum_count) = self.sum_counts.get(&(id.clone(), agent_type)) {
-                // The last non-zero count is the sum of all counts for the day
-                for count in sum_count.iter().rev() {
-                    if *count != 0 {
-                        cnt += *count as usize;
-                        break;
-                    }
-                }
+                cnt += Self::total_from_sum_count(sum_count);
             }
         }
         cnt
@@ -591,65 +598,34 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
 
     pub fn all_total_counts(&self) -> Counter<X> {
         let mut cnt = Counter::new();
-        for ((id, _, _), value) in &self.sum_counts {
-            cnt.add(id.clone(), *value);
+        for ((id, _), value) in &self.sum_counts {
+            cnt.add(id.clone(), Self::total_from_sum_count(value));
         }
         cnt
     }
 
-    pub fn count_per_hour(&self, id: X, time: Time) -> Vec<(AgentType, Vec<(Time, usize)>)> {
-        let hour = time.get_hours();
-        let mut results = Vec::new();
+    pub fn throughput_vec(&self, now: Time, id: X) -> Vec<(AgentType, Vec<(Time, usize)>)> {
+        let mut pts_per_type: BTreeMap<AgentType, Vec<(Time, usize)>> = BTreeMap::new();
+
         for agent_type in AgentType::all() {
             let mut pts = Vec::new();
-            for hour in 0..=hour {
-                let cnt = self
-                    .sum_counts
-                    .get(&(id.clone(), agent_type, hour))
-                    .cloned()
-                    .unwrap_or(0);
-                pts.push((Time::START_OF_DAY + Duration::hours(hour), cnt));
-                pts.push((Time::START_OF_DAY + Duration::hours(hour + 1), cnt));
-            }
-            pts.pop();
-            results.push((agent_type, pts));
-        }
-        results
-    }
 
-    pub fn raw_throughput(&self, now: Time, id: X) -> Vec<(AgentType, Vec<(Time, usize)>)> {
-        let window_size = Duration::hours(1);
-        let mut pts_per_type: BTreeMap<AgentType, Vec<(Time, usize)>> = BTreeMap::new();
-        let mut windows_per_type: BTreeMap<AgentType, Window> = BTreeMap::new();
-        for agent_type in AgentType::all() {
-            pts_per_type.insert(agent_type, vec![(Time::START_OF_DAY, 0)]);
-            windows_per_type.insert(agent_type, Window::new(window_size));
-        }
+            let mut t = Time::START_OF_DAY;
+            while t < now {
+                let interval_start = if t < Time::START_OF_DAY + Self::WINDOW_SIZE {
+                    0
+                } else {
+                    Self::time_to_interval(t - Self::WINDOW_SIZE)
+                };
+                let interval_end = Self::time_to_interval(t);
 
-        for (t, agent_type, x) in &self.raw {
-            if *x != id {
-                continue;
-            }
-            if *t > now {
-                break;
+                let count = self.sum_counts[&(id.clone(), agent_type)][interval_end]
+                    - self.sum_counts[&(id.clone(), agent_type)][interval_start];
+                pts.push((t, count as usize));
+                t += Self::THRUPUT_INTERVAL;
             }
 
-            let count = windows_per_type.get_mut(agent_type).unwrap().add(*t);
-            pts_per_type.get_mut(agent_type).unwrap().push((*t, count));
-        }
-
-        for (agent_type, pts) in pts_per_type.iter_mut() {
-            let mut window = windows_per_type.remove(agent_type).unwrap();
-
-            // Add a drop-off after window_size (+ a little epsilon!)
-            let t = (pts.last().unwrap().0 + window_size + Duration::seconds(0.1)).min(now);
-            if pts.last().unwrap().0 != t {
-                pts.push((t, window.count(t)));
-            }
-
-            if pts.last().unwrap().0 != now {
-                pts.push((now, window.count(now)));
-            }
+            pts_per_type.insert(agent_type, pts);
         }
 
         pts_per_type.into_iter().collect()
