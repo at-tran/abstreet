@@ -284,7 +284,7 @@ impl CompareThroughput {
     pub fn new(ctx: &mut EventCtx, app: &App) -> CompareThroughput {
         let after = app.primary.sim.get_analytics();
         let before = app.prebaked();
-        let hour = app.primary.sim.time().get_hours();
+        // let hour = app.primary.sim.time().get_hours();
 
         let mut after_road = Counter::new();
         let mut before_road = Counter::new();

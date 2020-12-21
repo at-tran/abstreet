@@ -528,7 +528,7 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
             sum_counts: HashMap::new(),
             prev_indices: HashMap::new(),
             thruput_interval: Duration::minutes(1),
-            window_size: Duration::minutes(30),
+            window_size: Duration::hours(1),
         }
     }
 
@@ -545,8 +545,8 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
         let interval = self.time_to_interval(time);
         let prev_index = *self
             .prev_indices
-            .get(&(id.clone(), agent_type))
-            .unwrap_or(&0);
+            .entry((id.clone(), agent_type))
+            .or_insert(0);
 
         if interval < prev_index {
             panic!(
@@ -563,11 +563,16 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
                     assert_eq!(sum_count[i], 0);
                     sum_count[i] = sum_count[i - 1];
                 }
-                sum_count[interval] = sum_count[interval - 1] + count as u16;
+                sum_count[interval] = count as u16
+                    + if interval >= 1 {
+                        sum_count[interval - 1]
+                    } else {
+                        0
+                    }
             }
             Entry::Vacant(entry) => {
                 let mut new_sum_counts =
-                    vec![0; (Duration::hours(24) / self.thruput_interval) as usize];
+                    vec![0; (Duration::hours(24) / self.thruput_interval) as usize + 1];
                 new_sum_counts[interval] = count as u16;
                 entry.insert(new_sum_counts);
             }
@@ -622,6 +627,17 @@ impl<X: Ord + Clone + Hash + Eq> TimeSeriesCount<X> {
     }
 }
 
+/// Given a sum_count vector, returns the total number of counts for the day.
+/// This is equal ot the last non-zero value in the vector.
+pub fn total_from_sum_count(sum_count: &Vec<u16>) -> usize {
+    for count in sum_count.iter().rev() {
+        if *count != 0 {
+            return *count as usize;
+        }
+    }
+    return 0;
+}
+
 pub struct Window {
     times: VecDeque<Time>,
     window_size: Duration,
@@ -648,15 +664,4 @@ impl Window {
         }
         self.times.len()
     }
-}
-
-/// Given a sum_count vector, returns the total number of counts for the day.
-/// This is equal ot the last non-zero value in the vector.
-pub fn total_from_sum_count(sum_count: &Vec<u16>) -> usize {
-    for count in sum_count.iter().rev() {
-        if *count != 0 {
-            return *count as usize;
-        }
-    }
-    return 0;
 }
